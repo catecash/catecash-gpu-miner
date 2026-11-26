@@ -38,6 +38,7 @@ def template():
 
 class Handler(BaseHTTPRequestHandler):
     calls = []
+    node_payout = False
 
     def log_message(self, *_args):
         pass
@@ -55,7 +56,7 @@ class Handler(BaseHTTPRequestHandler):
             result = template()
         elif method == "submitblock":
             block = bytes.fromhex(request["params"][0])
-            expected = prepare_template(template(), ADDRESS, "catecash-devnet")
+            expected = template() if self.node_payout else prepare_template(template(), ADDRESS, "catecash-devnet")
             assert len(block) == 108 + 32 + 1347 + 1 + len(bytes.fromhex(COINBASE))
             assert block[:4] == b"\x04\x00\x00\x00"
             assert block[4:36] == bytes(range(32))[::-1]
@@ -76,6 +77,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    Handler.node_payout = "--node-payout" in sys.argv
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -83,13 +85,15 @@ def main():
         with tempfile.TemporaryDirectory() as directory:
             cookie = Path(directory) / "rpc.cookie"
             cookie.write_text("mock:credential", encoding="utf-8")
-            result = subprocess.run([
+            command = [
                 sys.executable, str(ROOT / "solo.py"),
                 "--rpc-url", f"http://127.0.0.1:{server.server_port}",
                 "--cookie-file", str(cookie), "--network", "catecash-devnet",
-                "--payout-address", ADDRESS,
                 "--max-blocks", "1", "--intensity", "30",
-            ], cwd=ROOT, text=True, capture_output=True, timeout=20)
+            ]
+            if not Handler.node_payout:
+                command += ["--payout-address", ADDRESS]
+            result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=20)
         assert result.returncode == 0, result.stdout + result.stderr
         assert "Accepted block at height 7727" in result.stdout, result.stdout
         assert "getblocktemplatetoaddress" not in Handler.calls, Handler.calls

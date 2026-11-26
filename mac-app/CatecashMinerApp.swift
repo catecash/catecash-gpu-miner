@@ -89,15 +89,15 @@ struct ContentView: View {
 
     private var commonArguments: [String] {
         var arguments = ["--rpc-url", rpcURL.trimmingCharacters(in: .whitespacesAndNewlines),
-                         "--network", network,
-                         "--payout-address", payoutAddress.trimmingCharacters(in: .whitespacesAndNewlines)]
+                         "--network", network]
+        let payout = payoutAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !payout.isEmpty { arguments += ["--payout-address", payout] }
         if !cookiePath.isEmpty { arguments += ["--cookie-file", cookiePath] }
         return arguments
     }
 
     private var canStart: Bool {
-        !runner.isBusy && !rpcURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !payoutAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !runner.isBusy && !rpcURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -123,7 +123,7 @@ struct ContentView: View {
                     TextField("RPC cookie file", text: $cookiePath)
                     Button("Choose…") { chooseCookie() }
                 }
-                TextField("Mining wallet address", text: $payoutAddress)
+                TextField("Payout override (optional)", text: $payoutAddress)
                 HStack {
                     Slider(value: $intensity, in: 10...100, step: 10)
                     Text("\(Int(intensity))%")
@@ -135,7 +135,7 @@ struct ContentView: View {
             }
             .formStyle(.grouped)
 
-            Text("GPU intensity controls its approximate active time. macOS does not offer a per-core limit for this GPU.")
+            Text("Leave payout override blank to use the node's configured mining address. GPU intensity controls approximate active time; macOS does not offer a per-core limit.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

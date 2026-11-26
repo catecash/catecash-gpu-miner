@@ -9,7 +9,8 @@ Apple still supports GPU OpenCL on Apple Silicon, although [the API is
 deprecated](https://developer.apple.com/documentation/Apple-Silicon/porting-your-macos-apps-to-apple-silicon).
 This backend uses Marc Bevand's [SILENTARMY](https://github.com/mbevand/silentarmy)
 Equihash solver at commit `c6a9ca85a81708589c904d2cbf3c665cd7ce5fa0`,
-adapted to build on macOS ARM64. Its MIT license is in `LICENSE.upstream`.
+adapted to build on macOS ARM64. The upstream solver's MIT license is in
+`LICENSE.upstream`.
 
 **[Getting started](GETTING_STARTED.md)** covers the build, node connection,
 first RPC check, and mining commands. This repository contains source code;
@@ -18,15 +19,13 @@ are excluded.
 
 ## Build and verify
 
-Requires Xcode Command Line Tools (or Xcode), Rust 1.89+, Python 3.9+, and macOS with an
+Requires Xcode Command Line Tools (or Xcode), Python 3.9+, and macOS with an
 OpenCL-capable Apple GPU. No Python packages or wallet keys are required.
 
 ```sh
 make
 make devices
-cargo build --locked --manifest-path template-helper/Cargo.toml
-cp template-helper/target/debug/catecash-template-helper .
-python3 tests/smoke_solo.py
+python3 tests/smoke_solo.py --node-payout
 mac-app/build.sh
 ```
 
@@ -34,9 +33,24 @@ mac-app/build.sh
 GPU solver against a local mock RPC server, assembles a block, and exercises
 proposal and submit calls. It does not change a real chain.
 
-Open the locally built `dist/Catecash Miner.app` to enter the RPC URL, network, mining
-wallet address, and optional RPC cookie file. **Test RPC** checks that the node
-supports the selected wallet. **Start Mining** and **Stop** control the GPU
+The default path uses the payout address configured on your Zebra node. To
+override that payout in the miner, place a compatible Catecash Zebra checkout
+at `../catecash-zebra`. This optional path also requires Rust 1.89+:
+
+```sh
+cargo build --locked --manifest-path template-helper/Cargo.toml
+cp template-helper/target/debug/catecash-template-helper .
+python3 tests/smoke_solo.py
+mac-app/build.sh
+```
+
+The Rust helper needs the local `zebra-chain` and `vendor/zcash_*` crates from
+that checkout.
+
+Open the locally built `dist/Catecash Miner.app` to enter the RPC URL, network,
+and optional RPC cookie file. Leave the payout override blank to use the node's
+configured mining address. **Test RPC** checks the connection and block
+template. **Start Mining** and **Stop** control the GPU
 process. The intensity slider sets an approximate GPU duty cycle from 10% to
 100%; Apple GPUs do not expose a way to assign individual GPU cores to an app.
 Closing the window stops mining. Settings contain only the public wallet
@@ -49,10 +63,11 @@ sign the bundle with your own Developer ID Application identity and notarize it.
 ## Mine a Catecash node
 
 The node must be synchronized and expose Zebra's standard `getblocktemplate`,
-proposal, and `submitblock` RPCs. Enter a controlled Catecash transparent P2PKH
-address in the app. The miner rewrites the first coinbase output locally and
-recalculates transaction and block commitments before mining. The node does not
-need an update. Keep your wallet's private key in separate local storage.
+proposal, and `submitblock` RPCs. Configure a Catecash transparent P2PKH mining
+address you control on the node. With the optional helper, entering an override
+in the app makes the miner rewrite the first coinbase output locally and
+recalculate transaction and block commitments before mining. Keep your wallet's
+private key in separate local storage.
 
 ## Local devnet node on the Mac
 
@@ -83,11 +98,10 @@ Wait for the node to reach the chain tip. The app uses
 
 ```sh
 python3 preflight.py --rpc-url http://127.0.0.1:34342 \
-  --cookie-file local-node/rpc/.cookie --network catecash-devnet \
-  --payout-address YOUR_CATECASH_ADDRESS
+  --cookie-file local-node/rpc/.cookie --network catecash-devnet
 python3 solo.py --rpc-url http://127.0.0.1:34342 \
   --cookie-file local-node/rpc/.cookie --network catecash-devnet \
-  --payout-address YOUR_CATECASH_ADDRESS --max-blocks 1
+  --max-blocks 1
 ```
 
 The cookie and state directories are ignored by Git. RPC uses loopback HTTP.
@@ -119,8 +133,7 @@ starting the node.
 ```sh
 docker compose -f local-mainnet/compose.yaml up --build -d
 python3 preflight.py --rpc-url http://127.0.0.1:34332 \
-  --cookie-file local-mainnet/rpc/.cookie --network catecash-mainnet \
-  --payout-address YOUR_CATECASH_MAINNET_TRANSPARENT_ADDRESS
+  --cookie-file local-mainnet/rpc/.cookie --network catecash-mainnet
 ```
 
 The miner requires a transparent P2PKH address for coinbase payouts. A unified
