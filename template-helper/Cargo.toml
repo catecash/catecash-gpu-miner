@@ -1,0 +1,17 @@
+[package]
+name = "catecash-template-helper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zebra-chain = { path = "../../catecash-zebra/zebra-chain" }
+hex = "0.4"
+serde_json = "1"
+zcash_address = { path = "../../catecash-zebra/vendor/zcash_address" }
+
+[patch.crates-io]
+zcash_address = { path = "../../catecash-zebra/vendor/zcash_address" }
+zcash_keys = { path = "../../catecash-zebra/vendor/zcash_keys" }
+zcash_protocol = { path = "../../catecash-zebra/vendor/zcash_protocol" }
+zcash_primitives = { path = "../../catecash-zebra/vendor/zcash_primitives" }
+zcash_transparent = { path = "../../catecash-zebra/vendor/zcash_transparent" }

@@ -1,0 +1,18 @@
+services:
+  node:
+    image: catecash-zebra-local:mainnet
+    build: ./image
+    container_name: catecash-local-mainnet
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - 127.0.0.1:34332:34342
+    volumes:
+      - ./zebrad.toml:/etc/catecash/zebrad.toml:ro
+      - ./state:/var/lib/catecash/state
+      - ./rpc:/var/lib/catecash/rpc
+    tmpfs:
+      - /tmp
+    command: ["-c", "/etc/catecash/zebrad.toml", "start"]

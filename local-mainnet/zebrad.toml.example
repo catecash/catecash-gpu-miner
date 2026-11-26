@@ -1,0 +1,20 @@
+# Copy to zebrad.toml and set your own mainnet transparent P2PKH address.
+[network]
+network = "CatecashMainnet"
+listen_addr = "127.0.0.1:34333"
+initial_mainnet_peers = []
+initial_testnet_peers = ["mainnet.catecash.com:34333"]
+peerset_initial_target_size = 1
+cache_dir = false
+
+[state]
+cache_dir = "/var/lib/catecash/state"
+
+[rpc]
+listen_addr = "127.0.0.1:34352"
+enable_cookie_auth = true
+cookie_dir = "/var/lib/catecash/rpc"
+
+[mining]
+miner_address = "YOUR_MAINNET_TRANSPARENT_ADDRESS"
+internal_miner = false

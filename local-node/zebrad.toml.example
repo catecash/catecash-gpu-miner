@@ -1,0 +1,19 @@
+# Copy to zebrad.toml and set your own devnet transparent P2PKH address.
+[network]
+network = "CatecashDevnet"
+listen_addr = "0.0.0.0:34343"
+initial_testnet_peers = ["devnet.catecash.com:34343"]
+peerset_initial_target_size = 1
+cache_dir = false
+
+[state]
+cache_dir = "/var/lib/catecash/state"
+
+[rpc]
+listen_addr = "127.0.0.1:34352"
+enable_cookie_auth = true
+cookie_dir = "/var/lib/catecash/rpc"
+
+[mining]
+miner_address = "YOUR_DEVNET_TRANSPARENT_ADDRESS"
+internal_miner = false
