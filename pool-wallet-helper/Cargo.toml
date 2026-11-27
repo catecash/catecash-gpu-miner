@@ -1,0 +1,10 @@
+[package]
+name = "catecash-pool-wallet-helper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bs58 = "=0.5.1"
+ripemd = "=0.1.3"
+secp256k1 = "=0.33.1"
+sha2 = "=0.10.9"

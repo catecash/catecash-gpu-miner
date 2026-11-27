@@ -13,7 +13,9 @@ rm -f "$APP/Contents/Resources/catecash-template-helper"
 if [ -f "$ROOT/catecash-template-helper" ]; then
   cp "$ROOT/catecash-template-helper" "$APP/Contents/Resources/catecash-template-helper"
 fi
+cargo build --manifest-path "$ROOT/pool-wallet-helper/Cargo.toml" --release --locked
+cp "$ROOT/pool-wallet-helper/target/release/catecash-pool-wallet-helper" "$APP/Contents/Resources/"
 xcrun swiftc -O -parse-as-library -target arm64-apple-macosx13.0 \
-  -framework SwiftUI -framework AppKit \
+  -framework SwiftUI -framework AppKit -framework Security \
   "$ROOT/mac-app/CatecashMinerApp.swift" -o "$APP/Contents/MacOS/CatecashMiner"
 echo "$APP"

@@ -38,9 +38,11 @@ def pool_request(base, path, payload=None):
     return result
 
 
-def validate_job(job, network):
+def validate_job(job, network, plan):
     if job.get("network") != network:
         raise ValueError("pool job is for a different network")
+    if job.get("plan") != plan:
+        raise ValueError("pool job is for a different reward plan")
     job_id = job.get("job_id")
     if not isinstance(job_id, str) or not re.fullmatch(r"[0-9a-f]{1,32}", job_id):
         raise ValueError("pool job ID is invalid")
@@ -59,12 +61,16 @@ def check(args):
     status = pool_request(args.pool_url, "/v1/status")
     if status.get("protocol") != "catecash-pool/1" or status.get("network") != args.network:
         raise ValueError("pool protocol or network does not match")
+    local_development = (args.allow_unpaid_development and args.network != "catecash-mainnet"
+                         and urlparse(args.pool_url).hostname in {"localhost", "127.0.0.1", "::1"})
+    if status.get("payouts_enabled") is False and not local_development:
+        raise RuntimeError("pool has not enabled miner payouts")
     if status.get("ready") is not True:
         raise RuntimeError("pool is not ready to issue work")
-    query = urlencode({"address": args.payout_address, "worker": args.worker})
+    query = urlencode({"address": args.payout_address, "worker": args.worker, "plan": args.plan})
     job = pool_request(args.pool_url, "/v1/job?" + query)
-    validate_job(job, args.network)
-    print(f"Pool ready: {args.network}, height {job['height']}, worker {args.worker}", flush=True)
+    validate_job(job, args.network, args.plan)
+    print(f"Pool ready: {args.network}, {args.plan}, height {job['height']}, worker {args.worker}", flush=True)
     return job
 
 
@@ -94,9 +100,9 @@ def run(args):
                 raise RuntimeError(f"GPU solver exited with status {proc.returncode}")
             if time.monotonic() >= next_poll:
                 if current_id is not None:
-                    query = urlencode({"address": args.payout_address, "worker": args.worker})
+                    query = urlencode({"address": args.payout_address, "worker": args.worker, "plan": args.plan})
                     job = pool_request(args.pool_url, "/v1/job?" + query)
-                header, prefix, target = validate_job(job, args.network)
+                header, prefix, target = validate_job(job, args.network, args.plan)
                 if job["job_id"] != current_id:
                     # The solver accepts a little-endian target and appends its own nonce suffix.
                     line = f"{target[::-1].hex()} {job['job_id']} {header.hex()} {prefix.hex()}\n"
@@ -124,6 +130,7 @@ def run(args):
                 raise RuntimeError("GPU solver emitted a hash above share target")
             reply = pool_request(args.pool_url, "/v1/share", {
                 "address": args.payout_address, "worker": args.worker,
+                "plan": args.plan,
                 "job_id": found_id, "nonce": nonce.hex(), "solution": solution_hex,
             })
             if reply.get("accepted") is True:
@@ -148,10 +155,13 @@ def main():
     parser.add_argument("--network", required=True, choices=sorted(NETWORKS))
     parser.add_argument("--payout-address", required=True)
     parser.add_argument("--worker", default="mac")
+    parser.add_argument("--plan", choices=["proportional", "pplns"], default="proportional")
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--intensity", type=int, default=50)
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--allow-unpaid-development", action="store_true",
+                        help="allow a loopback devnet/testnet coordinator with no payouts")
     parser.add_argument("--max-shares", type=int, default=0, help="stop after N accepted shares (0 means continuous)")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()

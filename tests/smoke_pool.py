@@ -10,6 +10,7 @@ import threading
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
+VERIFIER = ROOT / "pool-verifier/target/release/catecash-pool-verifier"
 sys.path.insert(0, str(ROOT))
 from solo import double_sha256, header_prefix
 from smoke_solo import ADDRESS, template
@@ -37,9 +38,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply({"protocol": "catecash-pool/1", "network": "catecash-devnet", "ready": True})
         assert route.path == "/v1/job"
         params = parse_qs(route.query)
-        assert params == {"address": [ADDRESS], "worker": ["test-mac"]}, params
+        assert params == {"address": [ADDRESS], "worker": ["test-mac"], "plan": ["proportional"]}, params
         return self.reply({
-            "network": "catecash-devnet", "job_id": "a1b2c3d4", "height": 7727,
+            "network": "catecash-devnet", "plan": "proportional", "job_id": "a1b2c3d4", "height": 7727,
             "header": header_prefix(TEMPLATE).hex(), "nonce_prefix": "12345678",
             "share_target": "ff" * 32,
         })
@@ -47,13 +48,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         assert self.path == "/v1/share"
         share = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        assert share["address"] == ADDRESS and share["worker"] == "test-mac"
+        assert share["address"] == ADDRESS and share["worker"] == "test-mac" and share["plan"] == "proportional"
         assert share["job_id"] == "a1b2c3d4"
         nonce = bytes.fromhex(share["nonce"])
         solution = bytes.fromhex(share["solution"])
         assert len(nonce) == 32 and nonce[:4] == bytes.fromhex("12345678")
         assert len(solution) == 1347 and solution[:3] == b"\xfd\x40\x05"
         assert len(double_sha256(header_prefix(TEMPLATE) + nonce + solution)) == 32
+        verified = subprocess.run([str(VERIFIER), header_prefix(TEMPLATE).hex(), nonce.hex(), solution[3:].hex()],
+                                  capture_output=True, text=True, timeout=10)
+        assert verified.returncode == 0, verified.stderr
         key = (share["job_id"], share["nonce"], share["solution"])
         accepted = key not in self.shares
         self.shares.add(key)
@@ -61,6 +65,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    if not VERIFIER.is_file():
+        subprocess.run(["cargo", "build", "--manifest-path", str(ROOT / "pool-verifier/Cargo.toml"),
+                        "--release", "--offline"], check=True, cwd=ROOT)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

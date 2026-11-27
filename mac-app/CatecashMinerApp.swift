@@ -1,5 +1,73 @@
 import AppKit
+import Security
 import SwiftUI
+
+@MainActor
+final class PoolWalletStore: ObservableObject {
+    @Published var configuredAddress = ""
+    private let service = "com.athenalive.catecashminer.poolwallet"
+
+    private func itemQuery(network: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service,
+         kSecAttrAccount as String: network]
+    }
+
+    func refresh(network: String) {
+        var query = itemQuery(network: network)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let attributes = item as? [String: Any]
+        configuredAddress = status == errSecSuccess ? (attributes?[kSecAttrComment as String] as? String ?? "") : ""
+    }
+
+    func save(wif: String, network: String, expectedAddress: String) throws {
+        guard let resources = Bundle.main.resourceURL else { throw WalletSetupError("App resources are missing.") }
+        let helper = resources.appendingPathComponent("catecash-pool-wallet-helper")
+        guard FileManager.default.isExecutableFile(atPath: helper.path) else {
+            throw WalletSetupError("Wallet verification helper is missing.")
+        }
+        let process = Process()
+        let input = Pipe()
+        let output = Pipe()
+        process.executableURL = helper
+        process.arguments = [network]
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = Pipe()
+        try process.run()
+        input.fileHandleForWriting.write(Data(wif.utf8))
+        try input.fileHandleForWriting.close()
+        process.waitUntilExit()
+        let derived = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard process.terminationStatus == 0, derived == expectedAddress else {
+            throw WalletSetupError("The WIF does not match this network and pool receiving address.")
+        }
+        let secret = Data(wif.utf8)
+        var add = itemQuery(network: network)
+        add[kSecValueData as String] = secret
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        add[kSecAttrLabel as String] = "Catecash pool operator wallet"
+        add[kSecAttrComment as String] = expectedAddress
+        var status = SecItemAdd(add as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            status = SecItemUpdate(itemQuery(network: network) as CFDictionary,
+                                   [kSecValueData as String: secret,
+                                    kSecAttrComment as String: expectedAddress] as CFDictionary)
+        }
+        guard status == errSecSuccess else { throw WalletSetupError("Keychain could not save the wallet (status \(status)).") }
+        refresh(network: network)
+    }
+}
+
+struct WalletSetupError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
 
 @MainActor
 final class MinerRunner: ObservableObject {
@@ -120,6 +188,7 @@ final class MinerRunner: ObservableObject {
 
 struct ContentView: View {
     @StateObject private var runner = MinerRunner()
+    @StateObject private var poolWallet = PoolWalletStore()
     @AppStorage("rpcURL") private var rpcURL = "http://127.0.0.1:34342"
     @AppStorage("cookiePath") private var cookiePath = ""
     @AppStorage("network") private var network = "catecash-devnet"
@@ -129,6 +198,10 @@ struct ContentView: View {
     @AppStorage("miningMode") private var miningMode = "solo"
     @AppStorage("poolURL") private var poolURL = ""
     @AppStorage("workerName") private var workerName = "mac"
+    @AppStorage("poolPlan") private var poolPlan = "proportional"
+    @AppStorage("operatorPoolAddress") private var operatorPoolAddress = ""
+    @State private var operatorWIF = ""
+    @State private var walletMessage = ""
 
     private var commonArguments: [String] {
         var arguments = ["--rpc-url", rpcURL.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -149,7 +222,8 @@ struct ContentView: View {
         ["--pool-url", poolURL.trimmingCharacters(in: .whitespacesAndNewlines),
          "--network", network,
          "--payout-address", payoutAddress.trimmingCharacters(in: .whitespacesAndNewlines),
-         "--worker", workerName.trimmingCharacters(in: .whitespacesAndNewlines)]
+         "--worker", workerName.trimmingCharacters(in: .whitespacesAndNewlines),
+         "--plan", poolPlan]
     }
 
     private var miningArguments: [String] {
@@ -182,6 +256,10 @@ struct ContentView: View {
                     TextField("Pool URL", text: $poolURL)
                     TextField("Your payout address", text: $payoutAddress)
                     TextField("Worker name", text: $workerName)
+                    Picker("Reward plan", selection: $poolPlan) {
+                        Text("Proportional").tag("proportional")
+                        Text("PPLNS").tag("pplns")
+                    }
                 } else {
                     TextField("RPC URL", text: $rpcURL)
                     HStack {
@@ -193,6 +271,40 @@ struct ContentView: View {
             }
             .formStyle(.grouped)
             .disabled(runner.isBusy)
+
+            if miningMode == "pool" {
+                DisclosureGroup("Pool operator wallet on this Mac") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("This wallet receives pool blocks. It is separate from each miner's payout address.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        TextField("Pool receiving address", text: $operatorPoolAddress)
+                        SecureField("Compressed WIF private key", text: $operatorWIF)
+                        HStack {
+                            Button("Save encrypted in Keychain") {
+                                defer { operatorWIF = "" }
+                                do {
+                                    try poolWallet.save(wif: operatorWIF.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                        network: network,
+                                                        expectedAddress: operatorPoolAddress.trimmingCharacters(in: .whitespacesAndNewlines))
+                                    walletMessage = "Wallet verified and saved in this Mac's Keychain."
+                                } catch {
+                                    walletMessage = error.localizedDescription
+                                }
+                            }
+                            .disabled(operatorWIF.isEmpty || operatorPoolAddress.isEmpty || runner.isBusy)
+                            if !poolWallet.configuredAddress.isEmpty {
+                                Text(poolWallet.configuredAddress == operatorPoolAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+                                     ? "Verified wallet saved" : "Saved wallet address differs")
+                                    .font(.caption)
+                            }
+                        }
+                        if !walletMessage.isEmpty { Text(walletMessage).font(.caption) }
+                        Text("The WIF stays in Keychain on this Mac and is not sent to the pool server. Back up the wallet separately before funding it. Payout signing is not enabled yet.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                }
+            }
 
             HStack(spacing: 12) {
                 Text("GPU duty cycle")
@@ -265,6 +377,8 @@ struct ContentView: View {
         .padding(24)
         .frame(minWidth: 670, minHeight: 680)
         .onDisappear { runner.stop() }
+        .onAppear { poolWallet.refresh(network: network) }
+        .onChange(of: network) { value in poolWallet.refresh(network: value) }
         .task(id: intensity) {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled else { return }

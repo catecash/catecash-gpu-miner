@@ -22,17 +22,36 @@ are excluded.
 share verification, and payout work required before a public pool launch.
 The app can connect to a compatible prototype pool and submit GPU shares;
 the included mock pool is only for local testing and never pays miners.
+`pool_server.py` is a loopback-only development coordinator. It is closed by
+default, has no payout engine, and refuses unpaid mainnet development mining.
+The Rust verifier in `pool-verifier/` checks submitted Equihash solutions.
+`pool_accounting.py` records separate proportional and PPLNS share rounds in
+SQLite and calculates exact reward allocations after a candidate block. These
+are liabilities only; no transaction is signed or sent.
+`pool-image/build.sh` builds a container from an explicit source allowlist,
+keeping local RPC cookies, wallet files, and ledger data out of the image
+build context. The service is not deployed for public mining.
+For a local development coordinator on devnet or testnet, the CLI accepts
+`--allow-unpaid-development` only with a loopback pool URL. The Mac app never
+sets this flag.
+The Mac app has a separate pool operator wallet setup. It verifies that an
+imported compressed WIF derives the entered pool receiving address, then stores
+the WIF in this Mac's Keychain with device-only, unlocked access. The wallet
+helper receives WIF over stdin, and neither the pool server nor app settings
+receive it. Payout signing and broadcasting are not implemented yet.
 
 ## Build and verify
 
 Requires Xcode Command Line Tools (or Xcode), Python 3.9+, and macOS with an
-OpenCL-capable Apple GPU. No Python packages or wallet keys are required.
+OpenCL-capable Apple GPU. Building the native app's operator wallet helper also
+requires Rust and Cargo. No Python packages or wallet keys are required.
 
 ```sh
 make
 make devices
 python3 tests/smoke_solo.py --node-payout
 python3 tests/smoke_pool.py
+python3 -m unittest discover -s tests -p 'test_pool_*.py'
 mac-app/build.sh
 ```
 
