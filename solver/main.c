@@ -43,6 +43,7 @@ uint64_t	nr_nonces = 1;
 uint32_t	do_list_devices = 0;
 uint32_t	gpu_to_use = 0;
 uint32_t	mining = 0;
+uint32_t	duty_cycle = 50;
 double		kern_avg_run_time = 0;
 
 typedef struct  debug_s
@@ -1105,15 +1106,29 @@ void mining_mode(cl_context ctx, cl_command_queue queue,
                     job_id, sizeof (job_id),
                     header, ZCASH_BLOCK_HEADER_LEN,
                     &fixed_nonce_bytes);
+        struct timespec work_start, work_end;
+        get_time(&work_start);
         total += solve_equihash(ctx, queue, k_init_ht, k_rounds, k_sols, buf_ht,
                 buf_sols, buf_dbg, dbg_size, header, ZCASH_BLOCK_HEADER_LEN, 1,
                 fixed_nonce_bytes, target, job_id, &shares, rowCounters);
+        get_time(&work_end);
         total_shares += shares;
         if ((t1 = now()) > t0 + status_period)
           {
             t0 = t1;
             printf("status: %" PRId64 " %" PRId64 "\n", total, total_shares);
             fflush(stdout);
+          }
+        // Pause only after the GPU command queue has finished this nonce.
+        // This limits average GPU activity without stopping an in-flight kernel.
+        if (duty_cycle < 100)
+          {
+            double work_seconds = timespec_to_double(&work_end) -
+                timespec_to_double(&work_start);
+            double rest_seconds = work_seconds * (100.0 - duty_cycle) / duty_cycle;
+            struct timespec rest;
+            double_to_timespec(rest_seconds, &rest);
+            nanosleep(&rest, NULL);
           }
       }
 }
@@ -1380,6 +1395,7 @@ enum
     OPT_LIST,
     OPT_USE,
     OPT_MINING,
+    OPT_DUTY_CYCLE,
 };
 
 static struct option    optlong[] =
@@ -1396,6 +1412,7 @@ static struct option    optlong[] =
       {"list",		no_argument,		0,	OPT_LIST},
       {"use",		required_argument,	0,	OPT_USE},
       {"mining",	no_argument,		0,	OPT_MINING},
+      {"duty-cycle",	required_argument,	0,	OPT_DUTY_CYCLE},
       {0,		0,			0,	0},
 };
 
@@ -1416,6 +1433,7 @@ void usage(const char *progname)
             "  --use <id>     use GPU <id> (default: 0)\n"
             "  --mining       enable mining mode (solver controlled via "
 	    "stdin/stdout)\n"
+            "  --duty-cycle <10-100>  average GPU active time (default: 50)\n"
             , progname);
 }
 
@@ -1467,6 +1485,11 @@ int main(int argc, char **argv)
 		break ;
 	    case OPT_MINING:
 		mining = 1;
+		break ;
+	    case OPT_DUTY_CYCLE:
+		duty_cycle = parse_num(optarg);
+		if (duty_cycle < 10 || duty_cycle > 100)
+		    fatal("duty-cycle must be from 10 to 100\n");
 		break ;
             default:
                 fatal("Try '%s --help'\n", argv[0]);

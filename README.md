@@ -1,9 +1,10 @@
 # Catecash GPU Miner for macOS
 
-Standalone solo miner and native macOS app for Catecash on Apple Silicon. It uses the Mac's GPU
-through OpenCL to solve Equihash (200,9), obtains work from Catecash Zebra's
+Native macOS app for Catecash mining on Apple Silicon. Solo mode uses the Mac's
+GPU through OpenCL to solve Equihash (200,9), obtains work from Catecash Zebra's
 `getblocktemplate`, checks candidate blocks with proposal mode, and sends them
-with `submitblock`. It lives outside the Zebra repository.
+with `submitblock`. Pool mode is an experimental client for a compatible pool
+service. The miner lives outside the Zebra repository.
 
 Apple still supports GPU OpenCL on Apple Silicon, although [the API is
 deprecated](https://developer.apple.com/documentation/Apple-Silicon/porting-your-macos-apps-to-apple-silicon).
@@ -17,6 +18,11 @@ first RPC check, and mining commands. This repository contains source code;
 generated app bundles, solver binaries, local node state, and RPC credentials
 are excluded.
 
+**[Pool plan](POOL_PLAN.md)** describes the new Pool mode and the server,
+share verification, and payout work required before a public pool launch.
+The app can connect to a compatible prototype pool and submit GPU shares;
+the included mock pool is only for local testing and never pays miners.
+
 ## Build and verify
 
 Requires Xcode Command Line Tools (or Xcode), Python 3.9+, and macOS with an
@@ -26,6 +32,7 @@ OpenCL-capable Apple GPU. No Python packages or wallet keys are required.
 make
 make devices
 python3 tests/smoke_solo.py --node-payout
+python3 tests/smoke_pool.py
 mac-app/build.sh
 ```
 
@@ -51,8 +58,10 @@ Open the locally built `dist/Catecash Miner.app` to enter the RPC URL, network,
 and optional RPC cookie file. Leave the payout override blank to use the node's
 configured mining address. **Test RPC** checks the connection and block
 template. **Start Mining** and **Stop** control the GPU
-process. The intensity slider sets an approximate GPU duty cycle from 10% to
-100%; Apple GPUs do not expose a way to assign individual GPU cores to an app.
+process. The GPU duty cycle slider defaults to 50% and can be set from 10% to
+100%. The solver rests between completed GPU work units to reduce average GPU
+activity. A mining burst can still reach full GPU usage; Apple GPUs do not
+expose a way to reserve a fixed fraction of GPU cores for this app.
 Closing the window stops mining. Settings contain only the public wallet
 address, endpoint, and cookie file path, never the cookie contents.
 

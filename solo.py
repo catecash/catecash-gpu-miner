@@ -2,13 +2,13 @@
 """Mine Catecash blocks on the local Apple GPU using a Zebra block template."""
 
 import argparse
+from collections import deque
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import selectors
-import signal
 import subprocess
 import sys
 import time
@@ -19,6 +19,18 @@ from template_work import prepare_template
 
 
 SOLUTION_LINE = re.compile(r"^sol: (\S+) ([0-9a-fA-F]{8}) ([0-9a-fA-F]{64}) (fd4005[0-9a-fA-F]{2688})$")
+STATUS_LINE = re.compile(r"^status: (\d+) (\d+)$")
+TELEMETRY = Path.home() / "Library/Application Support/Catecash Miner/mining-telemetry.json"
+
+
+def write_telemetry(payload: dict) -> None:
+    """Publish public mining counters to a private, local file."""
+    TELEMETRY.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = TELEMETRY.with_suffix(".tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as output:
+        json.dump(payload, output)
+    os.replace(temporary, TELEMETRY)
 
 
 def compact_size(value: int) -> bytes:
@@ -78,7 +90,8 @@ def run(args: argparse.Namespace) -> int:
     binary = Path(__file__).resolve().parent / "sa-solver"
     if not binary.is_file():
         raise FileNotFoundError("sa-solver is missing; run make first")
-    proc = subprocess.Popen([str(binary), "--mining", "--use", str(args.device)],
+    proc = subprocess.Popen([str(binary), "--mining", "--use", str(args.device),
+                             "--duty-cycle", str(args.intensity)],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, bufsize=0)
     try:
@@ -91,19 +104,11 @@ def run(args: argparse.Namespace) -> int:
         job_id = 0
         next_poll = 0.0
         accepted = 0
-        paused = False
-        print(f"Mining {network} on GPU device {args.device}", flush=True)
+        samples = deque()
+        print(f"Mining {network} on GPU device {args.device} at {args.intensity}% average GPU duty cycle", flush=True)
         while True:
             if proc.poll() is not None:
                 raise RuntimeError(f"GPU solver exited with status {proc.returncode}")
-            if args.intensity < 100:
-                active = (time.monotonic() % 1.0) < (args.intensity / 100.0)
-                if active and paused:
-                    os.kill(proc.pid, signal.SIGCONT)
-                    paused = False
-                elif not active and not paused:
-                    os.kill(proc.pid, signal.SIGSTOP)
-                    paused = True
             if time.monotonic() >= next_poll:
                 template = rpc(args.rpc_url, args.cookie_file, "getblocktemplate", [])
                 if args.payout_address:
@@ -127,6 +132,21 @@ def run(args: argparse.Namespace) -> int:
                 continue
             match = SOLUTION_LINE.fullmatch(line)
             if not match:
+                status = STATUS_LINE.fullmatch(line)
+                if status and network == "catecash-mainnet":
+                    now = time.monotonic()
+                    samples.append((now, int(status.group(1))))
+                    while len(samples) > 2 and now - samples[0][0] > 10:
+                        samples.popleft()
+                    if len(samples) >= 2 and now > samples[0][0]:
+                        rate = max(0.0, (samples[-1][1] - samples[0][1]) /
+                                   (samples[-1][0] - samples[0][0]))
+                        try:
+                            write_telemetry({"network": network, "pid": os.getpid(),
+                                             "updated_at": time.time(), "solps": rate,
+                                             "payout_address": args.payout_address})
+                        except OSError:
+                            pass  # Mining must continue if local telemetry is unavailable.
                 if args.verbose and not line.startswith("status:"):
                     print(f"solver: {line}")
                 continue
@@ -159,8 +179,6 @@ def run(args: argparse.Namespace) -> int:
                 print(f"Node rejected block: {result}", file=sys.stderr)
             next_poll = 0.0
     finally:
-        if 'paused' in locals() and paused and proc.poll() is None:
-            os.kill(proc.pid, signal.SIGCONT)
         proc.terminate()
         try:
             proc.wait(timeout=3)
@@ -176,7 +194,7 @@ def main() -> int:
     parser.add_argument("--network", required=True, choices=sorted(NETWORKS))
     parser.add_argument("--payout-address", help="transparent Catecash P2PKH mining address")
     parser.add_argument("--device", type=int, default=0)
-    parser.add_argument("--intensity", type=int, default=100, help="approximate GPU duty cycle, 10 to 100 percent")
+    parser.add_argument("--intensity", type=int, default=50, help="average GPU duty cycle, 10 to 100 percent (default: 50)")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     parser.add_argument("--max-blocks", type=int, default=0, help="stop after N accepted blocks (0 means continuous)")
     parser.add_argument("--verbose", action="store_true")

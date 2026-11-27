@@ -50,7 +50,15 @@ for coinbase; use a transparent receiver that you control.
 In the app, enter the same RPC URL, network, and cookie path. Leave the payout
 override blank to use the address configured on your node.
 Click **Test RPC**, then **Start Mining**. **Stop** or closing the window stops
-the solver. The intensity slider controls an approximate GPU duty cycle.
+the solver. The GPU duty cycle slider defaults to 50%; lower it to 10% for
+more idle time between mining bursts. This limits average activity, while a
+single burst may briefly use the full GPU.
+
+For the experimental Pool mode, select **Pool**, enter the pool's HTTPS URL,
+your transparent payout address, and a worker name. Click **Test Pool** before
+starting. The pool must implement the protocol in [POOL_PLAN.md](POOL_PLAN.md).
+The local mock in `tests/smoke_pool.py` verifies the Mac client flow but does
+not validate Equihash or make payments; it must not be used as a public pool.
 
 For the command line:
 
@@ -65,6 +73,8 @@ python3 solo.py \
 Remove `--max-blocks 1` to run continuously; press Ctrl-C to stop. Use
 `--device N` to choose a GPU listed by `make devices`. An accepted block is
 reported with its height and hash. The node makes the final consensus decision.
+The CLI defaults to `--intensity 50`; pass `--intensity 20` for a lower average
+GPU duty cycle or `--intensity 100` for continuous work.
 
 To override the node's payout in the app or CLI, build the Rust template helper
 with Rust 1.89+ and a compatible sibling `../catecash-zebra` source checkout.
